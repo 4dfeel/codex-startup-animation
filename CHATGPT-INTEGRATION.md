@@ -92,8 +92,17 @@ regressions passed 82 dismissal, 133 analysis and 33 end-to-end privacy checks.
 
 All 200 files in the adapted build and all four .NET Framework 4.8 assemblies
 passed the package check, including read-only verification of the registered
-official application. Live cold-start playback remains a separate acceptance
-step; it cannot be established by those checks alone.
+official application. A subsequent real cold start confirmed the main layout,
+media preparation, a decoded first frame, applied wallpaper styling and continued
+2560 x 1440 playback. The renderer also paused when its document became hidden.
+This does not establish visual quality on other machines or every route.
+
+During cold start, the local WPF idle clip reported an IOException (HRESULT
+0x80070002). The new fallback retained the late-starting host, allowing wallpaper
+playback. A subsequent replay of the verified existing session completed the
+intro/idle/finale transition and reported a successful handoff while preserving
+the wallpaper. Full cold-start animation is still not established as reliable.
+The original media has not been changed and no system codec was installed.
 
 ## Security and provenance
 
