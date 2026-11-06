@@ -363,14 +363,31 @@ html[data-codex-dragon-background="v1"] #root main._MainContentSurface_yl8z4_2[d
     // sample chat text, descendants, computed paint, or per-frame state.
     return bindingAttributes.every(entry => entry.node.isConnected && entry.values.every((value, index) => value === entry.node.getAttribute(shellAttributeFilter[index])));
   }
+  // Audited from the signed Store 26.1029.7803.0 app.asar shell/composer
+  // exports. This build uses independent per-component hashes; only this
+  // complete known set is admitted, not arbitrary Name-* CSS classes.
+  const currentShellTokens = Object.freeze({
+    Layout: 'Layout-SYw9n4', Workspace: 'Workspace-IfYAxV',
+    MainContentSurface: 'MainContentSurface-EnuIYE', WorkspaceContent: 'WorkspaceContent-dnr6uY',
+    MainContentClip: 'MainContentClip-QvkcTI', MainContentFrame: 'MainContentFrame-sss8BP',
+    MainContentViewport: 'MainContentViewport-OinMfT', LeftPanel: 'LeftPanel-e8ghK3',
+    ApplicationMenuTopBar: 'ApplicationMenuTopBar-SLuX8q', FloatingHeader: 'FloatingHeader-OL_kp4',
+    MainContentTopFade: 'MainContentTopFade-T6W4RS', PageSurface: 'PageSurface-g2Llyi',
+    PageSurfaceLayout: 'PageSurfaceLayout-oqnRfB', ApplicationMenuPageSurfaceLayout: 'ApplicationMenuPageSurfaceLayout-yb71ay',
+    ComposerLayoutRoot: 'ComposerLayoutRoot-XCKS7O'
+  });
+  function componentCandidates(node, name) {
+    return String(node.className || '').split(/\s+/).filter(token => token.startsWith('_' + name + '_') || token.startsWith(name + '-'));
+  }
+  function hasComponent(node, name) { return componentCandidates(node, name).length !== 0; }
   function componentToken(node, name) {
-    const prefix = '_' + name + '_';
-    const tokens = String(node.className || '').split(/\s+/).filter(token => token.startsWith(prefix));
+    const tokens = componentCandidates(node, name);
     // The complete known component token is mandatory. A partial match or two
     // versions on one node is ambiguous, even if one happens to be supported.
     if (tokens.length !== 1) return null;
+    if (tokens[0] === currentShellTokens[name]) return { token: tokens[0], hash: 'audited-store-26.1029', family: 'store-26.1029' };
     const match = /^_[A-Za-z]+_([A-Za-z0-9]+)_([0-9]+)$/.exec(tokens[0]);
-    return match ? { token: tokens[0], hash: match[1] } : null;
+    return match ? { token: tokens[0], hash: match[1], family: 'legacy' } : null;
   }
   function bindSurfaceStyle(main, workspace, mainToken, workspaceToken, frameOnly = false) {
     const core = (frameOnly ? 'frame ' : 'main ') + mainToken.token + ' ' + workspaceToken.token;
@@ -385,7 +402,7 @@ html[data-codex-dragon-background="v1"] #root main._MainContentSurface_yl8z4_2[d
     for (const node of composers) {
       if (!['default', 'opaque', 'secondary'].includes(node.getAttribute('data-composer-surface-variant')) || node.closest('[data-app-shell-active-page="false"]')) continue;
       const actual = componentToken(node, 'ComposerLayoutRoot');
-      if (!actual || (composer && composer !== actual.token)) { layoutAudit.layoutAuditComposerAmbiguous = 1; layoutReason = 'composer-ambiguous'; return false; }
+      if (!actual || actual.family !== mainToken.family || (composer && composer !== actual.token)) { layoutAudit.layoutAuditComposerAmbiguous = 1; layoutReason = 'composer-ambiguous'; return false; }
       composer = actual.token; composerNodes.push(node);
     }
     if (attached && !bindingsDirty && bindingMain === main && bindingCore === core && bindingComposer === composer && cachedAttributesIntact()) { layoutReason = 'ready'; return true; }
@@ -407,7 +424,7 @@ html[data-codex-dragon-background="v1"] #root main._MainContentSurface_yl8z4_2[d
       containers.add(child);
       if (!children(child)) return false;
       for (const wrapper of child.children) {
-        if (String(wrapper.className || '').split(/\s+/).some(token => token.startsWith('_MainContentFrame_'))) {
+        if (hasComponent(wrapper, 'MainContentFrame')) {
           const frameToken = componentToken(wrapper, 'MainContentFrame');
           if (!frameToken || frameToken.hash !== mainToken.hash || wrapper.children.length > 128) return false;
           containers.add(wrapper);
@@ -420,7 +437,7 @@ html[data-codex-dragon-background="v1"] #root main._MainContentSurface_yl8z4_2[d
             let fadeNode = null;
             for (const decoration of chromeWrapper.children) {
               if (decoration.tagName !== 'DIV' || decoration.getAttribute('aria-hidden') !== 'true' ||
-                  !String(decoration.className || '').split(/\s+/).some(token => token.startsWith('_MainContentTopFade_'))) continue;
+                  !hasComponent(decoration, 'MainContentTopFade')) continue;
               if (fadeNode) return false;
               fadeNode = decoration; nodes.add(decoration);
               if (nodes.size > 128) return false;
@@ -441,7 +458,7 @@ html[data-codex-dragon-background="v1"] #root main._MainContentSurface_yl8z4_2[d
     for (const node of nodes) {
       if (node.closest('[data-app-shell-active-page="false"]')) continue;
       for (const name of shellComponents) {
-        if (!String(node.className || '').split(/\s+/).some(token => token.startsWith('_' + name + '_'))) continue;
+        if (!hasComponent(node, name)) continue;
         const actual = componentToken(node, name);
         if (!actual || actual.hash !== mainToken.hash || (bindings[name] && bindings[name] !== actual.token)) return false;
         bindings[name] = actual.token; attributeNodes.add(node);
@@ -517,7 +534,7 @@ html[data-codex-dragon-background="v1"] #root main._MainContentSurface_yl8z4_2[d
     layoutAudit.layoutAuditDecorationCount = 0; layoutAudit.layoutAuditDecorationValid = 0;
     let decorationInvalid = false;
     for (const child of row.children) {
-      if (!String(child.className || '').split(/\s+/).some(value => value.startsWith('_PageSurface_'))) continue;
+      if (!hasComponent(child, 'PageSurface')) continue;
       layoutAudit.layoutAuditDecorationCount++;
       const decoration = componentToken(child, 'PageSurface');
       if (pageSurface || !decoration || decoration.hash !== token.hash || child.tagName !== 'DIV' || child.getAttribute('aria-hidden') !== 'true') decorationInvalid = true;
@@ -547,7 +564,7 @@ html[data-codex-dragon-background="v1"] #root main._MainContentSurface_yl8z4_2[d
       layoutReason = 'workspace-shape';
       let actualWorkspace = null;
       for (const child of main.children) {
-        if (!String(child.className || '').split(/\s+/).some(token => token.startsWith('_WorkspaceContent_'))) continue;
+        if (!hasComponent(child, 'WorkspaceContent')) continue;
         if (actualWorkspace) return null;
         actualWorkspace = componentToken(child, 'WorkspaceContent'); selectedChild = child;
         // A module hash is shared; each component's final index is independent.

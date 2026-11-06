@@ -47,11 +47,11 @@ if(-not $SkipConfiguration) {
 }
 if($CreateDesktopShortcut) {
     $desktop=[Environment]::GetFolderPath('DesktopDirectory')
-    $link=Assert-RegularPath (Join-Path $desktop 'Codex Dragon (community).lnk')
+    $link=Assert-RegularPath (Join-Path $desktop 'ChatGPT Dragon.lnk')
     if(Test-Path -LiteralPath $link){Write-Warning 'The community shortcut already exists and was not replaced.'}
     else {
         $shell=New-Object -ComObject WScript.Shell;$shortcut=$null
-        try {$shortcut=$shell.CreateShortcut($link);$shortcut.TargetPath=Join-Path $destination 'Launch.exe';$shortcut.WorkingDirectory=$destination;$shortcut.Description='Community startup animation and wallpaper for Codex';$shortcut.Save()}
+        try {$shortcut=$shell.CreateShortcut($link);$shortcut.TargetPath=Join-Path $destination 'Launch.exe';$shortcut.WorkingDirectory=$destination;$shortcut.Description='Community startup animation and wallpaper for ChatGPT';$shortcut.Save()}
         finally {if($null -ne $shortcut){[void][Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut)};[void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)}
         $state=Get-Content -LiteralPath (Join-Path $destination 'install-state.json') -Raw|ConvertFrom-Json
         $state.shortcut=[ordered]@{path=$link;sha256=Get-Sha256 $link}

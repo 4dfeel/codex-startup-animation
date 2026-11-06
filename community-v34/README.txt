@@ -1,4 +1,14 @@
-﻿Codex Dragon — community startup animation and dynamic wallpaper
+Codex Dragon — community startup animation and dynamic wallpaper
+ChatGPT 26.1029 adaptation: 34.16.1-chatgpt-26.1029 / 34.16.1.0
+
+This local fork adds strictly checked CSS-token support for the signed Store
+ChatGPT 26.1029.7803.0 UI. Install.ps1 -CreateDesktopShortcut creates the separate
+ChatGPT Dragon.lnk pointing to Launch.exe. Fully exit ChatGPT normally before
+starting the first hosted wallpaper session. Build checks and synthetic tests
+alone do not establish live playback success. See CHATGPT-INTEGRATION.md in the
+fork for provenance, build instructions and limitations.
+
+Historical community R16 notes follow.
 Portable V34-r16 early-dismissal reliability test candidate for Windows 10/11 x64
 
 STATUS
