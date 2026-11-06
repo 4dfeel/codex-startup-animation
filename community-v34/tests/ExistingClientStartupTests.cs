@@ -99,6 +99,48 @@ internal static class ExistingClientStartupTests {
         f=new Fixture();f.FindBehavior=n=>null;f.RunningBehavior=n=>false;r=f.Run();
         Check(r.Target==null&&f.Activations==0&&f.RunningChecks==1,"cold race remains delegated to existing locked host guard");
     }
+    static void RetiringCases(){
+        var f=new Fixture();f.FindBehavior=n=>null;
+        f.Hooks.InspectBackgroundHost=scope=>WarmHostState.Retiring;
+        f.Hooks.RetiringHostExited=()=>f.Now>=900;
+        f.RunningBehavior=n=>f.Now<600;
+        var r=f.Run();
+        Check(r.Decision==WarmStartupDecision.Cold&&r.Reason=="retiring-exited","one click waits for retiring client and host then chooses cold");
+        Check(f.Now>=900&&f.Now<8000&&f.Activations==0&&f.Prompts==0&&f.Clears==1,"retiring transition never revives, kills or prompts the old client");
+        foreach(bool hostExited in new[]{false,true}){
+            f=new Fixture();f.FindBehavior=n=>null;f.Hooks.InspectBackgroundHost=scope=>WarmHostState.Retiring;
+            f.Hooks.RetiringHostExited=()=>hostExited;r=f.Run();
+            Check(r.Decision==WarmStartupDecision.Unavailable&&r.Reason=="retiring-timeout","live retiring client blocks cold even after host exits "+hostExited);
+            Check(f.Activations==0&&f.Clears==0&&f.Now<=8000,"retirement timeout has no activation or unbounded wait "+hostExited);
+        }
+        f=new Fixture();f.FindBehavior=n=>null;f.RunningBehavior=n=>n==1;
+        f.Hooks.InspectBackgroundHost=scope=>WarmHostState.Retiring;f.Hooks.RetiringHostExited=()=>false;r=f.Run();
+        Check(r.Decision==WarmStartupDecision.Unavailable&&f.Clears==0&&f.Activations==0,"dead client with live old host cannot race the launch lock");
+        f=new Fixture();f.FindBehavior=n=>n==1?null:f.Window;
+        f.Hooks.InspectBackgroundHost=scope=>WarmHostState.Retiring;f.Hooks.RetiringHostExited=()=>false;r=f.Run();
+        Check(r.Reason=="retiring-window"&&f.Activations==0&&f.Clears==0,"new visible window while waiting remains untouched");
+        f=new Fixture();f.FindBehavior=n=>null;f.Hooks.InspectBackgroundHost=scope=>{throw new InvalidOperationException();};r=f.Run();
+        Check(r.Reason=="identity-unavailable"&&f.Activations==0,"background attestation exception cannot authorize activation");
+        foreach(var state in new[]{WarmHostState.Disabled,WarmHostState.Paused,WarmHostState.Unavailable,WarmHostState.Unverified}){
+            f=new Fixture();f.FindBehavior=n=>n<3?null:f.Window;f.Hooks.InspectBackgroundHost=scope=>state;r=f.Run();
+            Check(r.Decision==WarmStartupDecision.Replay&&f.Activations==1,"ordinary background activation remains available for "+state);
+        }
+        f=new Fixture();f.FindBehavior=n=>null;f.Hooks.InspectBackgroundHost=scope=>WarmHostState.Retiring;
+        f.Hooks.RetiringHostExited=()=>true;f.RunningBehavior=n=>n==1||n>=3;
+        r=f.Run();Check(r.Decision!=WarmStartupDecision.Cold&&f.Clears==0,"a new official process after old host exit blocks cold");
+        Check(ExistingClientStartup.ClassifyManagedHost(new BridgeStatus{MediaCode=172,Disabled=true,Health="faulted",ActualPhase="retired",DesiredMode="disabled"})==WarmHostState.Retiring,"actual target-loss terminal status is recognized despite cleanup disable");
+        foreach(int code in new[]{6,166,170,171,173,199}){
+            Check(ExistingClientStartup.ClassifyManagedHost(new BridgeStatus{MediaCode=code,Disabled=true,Health="faulted",ActualPhase="retired",DesiredMode="disabled"})!=WarmHostState.Retiring,"other failures and user disable cannot become retirement "+code);
+        }
+        Check(ExistingClientStartup.ClassifyManagedHost(new BridgeStatus{MediaCode=172,Disabled=true,Health="fresh",ActualPhase="retired"})!=WarmHostState.Retiring,"nonterminal target-loss hint cannot authorize retirement");
+        using(var release=new ManualResetEvent(false))using(var finished=new ManualResetEvent(false)){
+            int published=0;f=new Fixture();f.FindBehavior=n=>null;
+            f.Hooks.InspectBackgroundHost=scope=>{try{release.WaitOne(1500);scope.Publish(()=>Interlocked.Increment(ref published));return WarmHostState.Retiring;}finally{finished.Set();}};
+            f.Hooks.Read=(read,budget)=>ExistingClientStartup.BoundedRead(read,Math.Min(40,budget));
+            r=f.Run();Check(r.Decision==WarmStartupDecision.Unavailable&&f.Activations==0,"background attestation read has a real deadline");
+            release.Set();Check(finished.WaitOne(1000)&&published==0,"late background probe cannot retain a host after scope is closed");
+        }
+    }
     static void HostStatusCases(){
         Check(ExistingClientStartup.ClassifyManagedHost(new BridgeStatus{MediaCode=6,Disabled=true,DesiredMode="disabled"})==WarmHostState.Disabled,"actual processed user-disable code6 is disabled, not fault");
         Check(ExistingClientStartup.ClassifyManagedHost(new BridgeStatus{MediaCode=166,Disabled=true,DesiredMode="enabled"})==WarmHostState.Faulted,"terminal host failure remains faulted");
@@ -200,7 +242,7 @@ internal static class ExistingClientStartupTests {
                 try{NativeSuite(args[1]);File.WriteAllText(args[2],"{\"passed\":true,\"checks\":"+checks+",\"privateNonInputDesktop\":true}");return 0;}
                 catch(Exception error){File.WriteAllText(args[2],error.Message);return 1;}
             }
-            DecisionCases();HostStatusCases();LateObservationCase();LateActivationCases();NativeParent(Path.Combine(args[0],"native-results.json"));
+            DecisionCases();RetiringCases();HostStatusCases();LateObservationCase();LateActivationCases();NativeParent(Path.Combine(args[0],"native-results.json"));
             Console.WriteLine("{\"passed\":true,\"checks\":"+checks+",\"actualCodexStarted\":false,\"syntheticDecisionsAndPrivateDesktop\":true}");return 0;
         }catch(Exception error){Console.WriteLine("FAIL: "+error);return 1;}
     }

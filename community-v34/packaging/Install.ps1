@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$Destination=(Join-Path $env:LOCALAPPDATA 'Programs\CodexDragonPublic'),
+    [string]$Destination='H:\Apps\ChatGPTDragon-34.16.3',
     [switch]$CreateDesktopShortcut,
     [switch]$BindOfficialDesktopShortcut,
     [switch]$SkipConfiguration

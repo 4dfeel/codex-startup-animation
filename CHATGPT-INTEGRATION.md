@@ -24,10 +24,34 @@ when the host is still starting. Real host, identity and layout failures retain
 their existing failure behavior. This fallback does not change the media or
 install system codecs, and does not count as a successful animated handoff.
 
-The local build is identified as `34.16.2-chatgpt-26.1029` / `34.16.2.0`, so it
+The local build is identified as `34.16.3-chatgpt-26.1029` / `34.16.3.0`, so it
 can be distinguished from the unmodified upstream R16 package. Optional
 `-CreateDesktopShortcut` creates a separate `ChatGPT Dragon.lnk` pointing to
 the outer `Launch.exe`.
+
+## First-click shutdown race (34.16.3)
+
+Closing the official window can detach its page while the signed client and
+private-pipe host finish a roughly five-second shutdown. Re-activating that
+retiring process can briefly reopen a window which then exits, making the user
+click again for a real cold start.
+
+Before activating a background-only client, the launcher now checks the attested
+same-directory host. Only its exact target-loss terminal state may enter a
+bounded retirement wait. It sends no activation or termination request while
+waiting. A single cold start is selected only after the pinned old host exits
+and registered official-process absence is confirmed again. A new visible
+window, timeout, unknown identity or another error does not authorize a restart.
+Pause, user disable and ordinary background activation retain their behavior.
+
+The startup suite passed 80 checks, including native fixtures on a private
+non-input desktop; route and privacy diagnostics passed 74 checks. This is not
+yet a real close-and-immediately-reopen acceptance test on the installed client.
+
+This personal fork now defaults to `H:\Apps\ChatGPTDragon-34.16.3` for a fresh
+installation. Projects, build output and temporary compilation files for this
+fix are on H. Existing C-drive installations are retained as rollback copies;
+updating a desktop shortcut on C requires the owner's explicit consent.
 
 ## Known upstream reports
 

@@ -1,6 +1,6 @@
 # ChatGPT 龙娘启动动画与动态壁纸
 
-本 fork 在社区 R16 基础上适配 Windows ChatGPT `26.1029.7803.0` 的界面类名，构建版本为 `34.16.2-chatgpt-26.1029`。安装时可创建独立的 **ChatGPT Dragon** 桌面入口，指向经过完整性校验的 `Launch.exe`。源码、构建和已知问题见 [适配说明](CHATGPT-INTEGRATION.md)。
+本 fork 在社区 R16 基础上适配 Windows ChatGPT `26.1029.7803.0` 的界面类名，构建版本为 `34.16.3-chatgpt-26.1029`。安装时可创建独立的 **ChatGPT Dragon** 桌面入口，指向经过完整性校验的 `Launch.exe`。源码、构建和已知问题见 [适配说明](CHATGPT-INTEGRATION.md)。
 
 下面保留社区 R16 的原始发行说明。下载链接提供的是上游 R16 和完整素材，**不包含本 fork 的适配**；需要按适配说明重新构建。
 

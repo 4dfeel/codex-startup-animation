@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace DragonLauncher
 {
-    internal enum WarmHostState { Unchecked, Unavailable, Unverified, Managed, Disabled, Paused, Faulted, AnimationOnly }
+    internal enum WarmHostState { Unchecked, Unavailable, Unverified, Managed, Disabled, Paused, Faulted, AnimationOnly, Retiring }
     internal enum WarmStartupDecision { Cold, Replay, Cancelled, Unavailable }
     internal sealed class WarmStartupResult<T> where T : class
     {
@@ -32,6 +32,8 @@ namespace DragonLauncher
         internal Func<bool> IsRunning;
         internal Action<int> Activate;
         internal Func<T,WarmHostState> InspectHost;
+        internal Func<WarmObservation,WarmHostState> InspectBackgroundHost;
+        internal Func<bool> RetiringHostExited;
         internal Func<bool,bool> AskRetry;
         internal Func<long> Elapsed;
         internal Action<int> Delay;
@@ -56,6 +58,7 @@ namespace DragonLauncher
                 case WarmHostState.Paused:return "paused";
                 case WarmHostState.Faulted:return "faulted";
                 case WarmHostState.AnimationOnly:return "animation-only";
+                case WarmHostState.Retiring:return "retiring";
                 default:return "unchecked";
             }
         }
@@ -83,8 +86,9 @@ namespace DragonLauncher
         }
 
         // Every mutating activation is explicit and issued at most once. Reads
-        // after activation are bounded by the ORIGINAL deadline. Only a later
-        // user Retry can authorize a fresh absence check and the cold route.
+        // after activation are bounded by the ORIGINAL deadline. Attested retirement
+        // can enter cold only after the pinned host and all official clients exit;
+        // otherwise only an explicit Retry may request another absence check.
         internal static WarmStartupResult<T> Decide<T>(bool wallpaper,WarmStartupHooks<T> hooks,Action<string> log=null) where T : class
         {
             long started=hooks.Elapsed(),deadline=started+AutomaticTimeoutMilliseconds;
@@ -94,6 +98,33 @@ namespace DragonLauncher
                 if(target==null){
                     if(!Observe(hooks,deadline,scope=>hooks.IsRunning()))
                         return Result(hooks,log,started,activations,host,WarmStartupDecision.Cold,"no-running");
+                    // A destroyed page can leave a signed process and its private
+                    // pipe alive briefly while the app finishes shutting down.
+                    // Activating that retiring generation revives a window which
+                    // then disappears. Do not mutate it or replay an animation.
+                    if(wallpaper&&hooks.InspectBackgroundHost!=null){
+                        host=Observe(hooks,deadline,scope=>hooks.InspectBackgroundHost(scope));
+                        if(host==WarmHostState.Retiring){
+                            if(hooks.RetiringHostExited==null)throw new InvalidOperationException();
+                            Record(hooks,log,started,activations,host,"wait","retiring-host");
+                            while(Remaining(deadline,hooks.Elapsed())>0){
+                                bool running=Observe(hooks,deadline,scope=>hooks.IsRunning());
+                                bool released=Observe(hooks,deadline,scope=>hooks.RetiringHostExited());
+                                if(!running&&released){
+                                    // Reconfirm absence after the exact old host
+                                    // released its launch lock; the cold Host also
+                                    // repeats its own locked signed-process checks.
+                                    if(!Observe(hooks,deadline,scope=>hooks.IsRunning()))
+                                        return Result(hooks,log,started,activations,host,WarmStartupDecision.Cold,"retiring-exited");
+                                }
+                                if(Observe(hooks,deadline,scope=>hooks.Find(scope))!=null)
+                                    return Result(hooks,log,started,activations,host,WarmStartupDecision.Unavailable,"retiring-window");
+                                int wait=Math.Min(100,Remaining(deadline,hooks.Elapsed()));
+                                if(wait>0)hooks.Delay(wait);
+                            }
+                            return Result(hooks,log,started,activations,host,WarmStartupDecision.Unavailable,"retiring-timeout");
+                        }
+                    }
                     int budget=Math.Min(4000,Remaining(deadline,hooks.Elapsed()));
                     if(budget<=0)throw new TimeoutException();
                     activations=1;Record(hooks,log,started,activations,host,"activate","no-window");
@@ -120,7 +151,7 @@ namespace DragonLauncher
                 if(Managed(host))return Result(hooks,log,started,activations,host,WarmStartupDecision.Replay,
                     activations==0?"existing-window":"window-recovered",target);
             }catch(Exception error){return Result(hooks,log,started,activations,host,WarmStartupDecision.Unavailable,
-                error.GetBaseException() is TimeoutException?"observation-timeout":"identity-unavailable");}
+                error.GetBaseException() is TimeoutException?(host==WarmHostState.Retiring?"retiring-timeout":"observation-timeout"):"identity-unavailable");}
 
             Record(hooks,log,started,activations,host,"needs-exit","host-unavailable");
             bool stillRunning=false;
@@ -182,6 +213,10 @@ namespace DragonLauncher
         }
         internal static WarmHostState ClassifyManagedHost(BridgeStatus status)
         {
+            // Only the attested target-loss terminal state is a retiring page.
+            // A user disable, pause, decode/layout failure or unknown state is
+            // never permission to reset a session or restart an active client.
+            if(status.MediaCode==172&&status.Disabled&&status.Health=="faulted"&&status.ActualPhase=="retired")return WarmHostState.Retiring;
             // User disable retires decoration with MediaCode=6. Preserve that
             // explicit intent instead of diagnosing it as a renderer failure.
             if(status.DesiredMode=="disabled")return WarmHostState.Disabled;
@@ -205,18 +240,33 @@ namespace DragonLauncher
         {
             var clock=Stopwatch.StartNew();
             var search=new ExistingReplayTarget.UncommittedSearch(settings,root,log);
+            BridgeSession retiringSession=null;
             var hooks=new WarmStartupHooks<ExistingReplayTarget>{
                 Find=scope=>FindVerified(search),IsCurrent=target=>target.IsCurrent,
                 IsRunning=()=>CodexDragon.Official.OfficialIdentityResolver.IsOfficialRunning(),
                 Activate=budget=>{AppActivation.OpenBounded(settings,budget);},
-                InspectHost=target=>InspectHost(settings,root,target,log),AskRetry=AskRetry,
+                                InspectHost=target=>InspectHost(settings,root,target,log),AskRetry=AskRetry,
+                InspectBackgroundHost=scope=>{
+                    var candidate=BridgeActivation.Discover(root,0,log);
+                    if(candidate==null)return WarmHostState.Unavailable;
+                    try{
+                        if(BridgeClientIdentity.Attest(settings,root,candidate,log)==null)return WarmHostState.Unverified;
+                        var status=candidate.LastStatus;
+                        var kind=status==null?WarmHostState.Unverified:ClassifyManagedHost(status);
+                        if(kind==WarmHostState.Retiring)scope.Publish(()=>{retiringSession=candidate;candidate=null;});
+                        return kind;
+                    }finally{if(candidate!=null)candidate.Dispose();}
+                },
+                RetiringHostExited=()=>retiringSession!=null&&retiringSession.HostExited,
                 Elapsed=()=>clock.ElapsedMilliseconds,Delay=Thread.Sleep,
                 ClearUncommitted=NativeHandoff.ClearUncommittedBridgeTarget,Read=BoundedRead
             };
-            var result=Decide(settings.WallpaperEnabled,hooks,log);
-            if(result.Decision==WarmStartupDecision.Replay&&!result.Target.CommitSelection())
-                return Result(hooks,log,0,result.ActivationCount,result.HostState,WarmStartupDecision.Unavailable,"target-ended");
-            return result;
+            try{
+                var result=Decide(settings.WallpaperEnabled,hooks,log);
+                if(result.Decision==WarmStartupDecision.Replay&&!result.Target.CommitSelection())
+                    return Result(hooks,log,0,result.ActivationCount,result.HostState,WarmStartupDecision.Unavailable,"target-ended");
+                return result;
+            }finally{if(retiringSession!=null)retiringSession.Dispose();}
         }
     }
 }

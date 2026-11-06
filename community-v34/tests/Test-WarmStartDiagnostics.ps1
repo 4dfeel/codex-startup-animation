@@ -96,5 +96,17 @@ $waiting=Report @((Entry 0),(Route 1 'needs-exit' 'host-unavailable' 'unavailabl
 $waiting.logs+=[pscustomobject]@{log='diagnostics/portable-launch.log';records=@([pscustomobject]@{utc=(Stamp 121);category='public-entry';publicCode='PUBLIC_CHILD_TIMEOUT'})}
 $text=Get-CodexDiagnosticAnalysis $waiting $null
 Check ($text.Contains('没有通过验证的同目录壁纸会话') -and $text.Contains('PUBLIC_CHILD_TIMEOUT') -and $text.Contains('达到 120 秒') -and $text.Contains('不关闭子程序') -and $text.Contains('重试/取消') -and $text.Contains('不能仅凭该码认定壁纸故障') -and -not $text.Contains('壁纸宿主报告故障')) 'parent wait timeout during Retry Cancel remains user-wait evidence rather than wallpaper failure'
+foreach($case in @(@('wait','retiring-host','正在等待'),@('cold','retiring-exited','冷启动'),@('unavailable','retiring-window','出现了新窗口'),@('unavailable','retiring-timeout','尚未完成退出'))){
+    $route=Route 1 $case[0] $case[1] 'retiring' 0
+    Check ($route.decision -ceq $case[0] -and $route.reason -ceq $case[1] -and $route.hostState -ceq 'retiring') ('retirement route fields '+$case[1])
+    $text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),$route)) $null
+    Check ($text.Contains($case[2]) -and -not $text.Contains('当时确认了首帧')) ('retirement route analysis '+$case[1])
+}
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),(Route 1 'wait' 'retiring-host' 'retiring' 1))) $null
+Check ($text.Contains('路由字段相互矛盾')) 'retirement never claims an activation request'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),(Route 1 'cold' 'retiring-exited' 'unverified' 0))) $null
+Check ($text.Contains('路由字段相互矛盾')) 'unverified host cannot claim a retired cold route'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),(Route 1 'wait' 'retiring-host' 'retiring' 0)) $oldHost) $null
+Check (-not $text.Contains('当时确认了首帧')) 'old host playback cannot establish progress during retirement'
 [IO.File]::WriteAllText((Join-Path $WorkRoot 'results.json'),(@{passed=$true;checks=$checks}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 Write-Output ('ALL PASS: warm-start diagnostics '+$checks)
