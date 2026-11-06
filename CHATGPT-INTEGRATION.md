@@ -24,12 +24,12 @@ when the host is still starting. Real host, identity and layout failures retain
 their existing failure behavior. This fallback does not change the media or
 install system codecs, and does not count as a successful animated handoff.
 
-The local build is identified as `34.16.4-chatgpt-26.1029` / `34.16.4.0`, so it
+The local build is identified as `34.16.5-chatgpt-26.1029` / `34.16.5.0`, so it
 can be distinguished from the unmodified upstream R16 package. Optional
 `-CreateDesktopShortcut` creates a separate `ChatGPT Dragon.lnk` pointing to
 the outer `Launch.exe`.
 
-## First-click shutdown race (34.16.4)
+## First-click shutdown race (34.16.5)
 
 Closing the official window can detach its page while the signed client and
 private-pipe host finish a roughly five-second shutdown. Re-activating that
@@ -55,10 +55,28 @@ The startup suite passed 88 checks, including native fixtures on a private
 non-input desktop; route and privacy diagnostics passed 77 checks. This is not
 yet a real close-and-immediately-reopen acceptance test on the installed client.
 
-This personal fork now defaults to `H:\Apps\ChatGPTDragon-34.16.4` for a fresh
+This personal fork now defaults to `H:\Apps\ChatGPTDragon-34.16.5` for a fresh
 installation. Projects, build output and temporary compilation files for this
 fix are on H. Existing C-drive installations are retained as rollback copies;
 updating a desktop shortcut on C requires the owner's explicit consent.
+
+## Hidden console inheritance (34.16.5)
+
+A local process-only startup trace observed the official client starting console
+workers. With a GUI-only parent chain, those workers can create individual
+console windows. The wallpaper host is now a console-subsystem helper created
+with its console hidden at creation time. Electron's normal parent-console
+attachment lets subsequent console workers share that hidden console.
+
+The public launcher, animation and controls remain GUI applications. The host
+is started directly with shell execution disabled and hidden window style;
+no visible console is allocated and then hidden. No official application file,
+Electron fuse, account setting or debug transport is changed.
+
+A private non-input desktop regression verifies a GUI launcher -> hidden console
+host -> Electron-like GUI attachment -> default console worker chain. The host
+and both descendants report the same hidden console. The 88 startup-route
+checks also still pass. Actual visual acceptance remains a separate step.
 
 ## Known upstream reports
 

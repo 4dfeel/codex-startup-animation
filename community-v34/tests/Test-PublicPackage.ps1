@@ -6,7 +6,13 @@ $root=Assert-RegularPath $ReleaseRoot
 $manifest=Read-PackageManifest $root
 Test-PackageFiles $root $manifest
 foreach($name in @('Launch.exe','Start-Codex-Dragon.exe','WallpaperControls.exe','WallpaperHost.exe')) {
-    $assembly=[Reflection.Assembly]::ReflectionOnlyLoad([IO.File]::ReadAllBytes((Join-Path $root $name)))
+    $binary=[IO.File]::ReadAllBytes((Join-Path $root $name))
+    if($binary.Length -lt 96){throw ('Invalid PE header: '+$name)}
+    $pe=[BitConverter]::ToInt32($binary,60)
+    if($pe -lt 64 -or $pe -gt $binary.Length-94 -or [BitConverter]::ToUInt32($binary,$pe) -ne 0x4550){throw ('Invalid PE offset: '+$name)}
+    $expectedSubsystem=if($name -ceq 'WallpaperHost.exe'){3}else{2}
+    if([BitConverter]::ToUInt16($binary,$pe+92) -ne $expectedSubsystem){throw ('Invalid GUI/hidden-console subsystem: '+$name)}
+    $assembly=[Reflection.Assembly]::ReflectionOnlyLoad($binary)
     $framework=@($assembly.GetCustomAttributesData()|Where-Object {$_.AttributeType.FullName -ceq 'System.Runtime.Versioning.TargetFrameworkAttribute'})
     if($framework.Count -ne 1 -or $framework[0].ConstructorArguments[0].Value -cne '.NETFramework,Version=v4.8'){throw ('Invalid framework: '+$name)}
 }
