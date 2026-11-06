@@ -292,7 +292,7 @@ namespace DragonLauncher
             internal EventHandler<ExceptionRoutedEventArgs> FailHandler;
         }
         private readonly string introPath, idlePath, finalePath;
-        private readonly Action<string> log, fail;
+        private readonly Action<string> log, fail, mediaFailure;
         private readonly Stopwatch clock = new Stopwatch();
         private Slot active, next, retiring;
         private bool disposed, started, finalizing, handoffAcknowledged;
@@ -303,9 +303,9 @@ namespace DragonLauncher
         internal double FinalePosition { get { return InFinale ? active.Media.Position.TotalSeconds : 0; } }
         internal double TypographyPosition { get { return active==null||!active.Opened?0:active.Role=="intro"?active.Media.Position.TotalSeconds:active.Role=="idle"?4.75:4.75+active.Media.Position.TotalSeconds; } }
         internal bool FinaleReady { get { return InIdle && Warm(next) && next.Role=="finale"; } }
-        internal LivingFilmPlayback(string root,Settings config,Action<string> logger,Action<string> failure)
+        internal LivingFilmPlayback(string root,Settings config,Action<string> logger,Action<string> failure,Action<string> localMediaFailure)
         {
-            log=logger;fail=failure;ClipToBounds=true;Background=Brushes.Black;IsHitTestVisible=false;
+            log=logger;fail=failure;mediaFailure=localMediaFailure;ClipToBounds=true;Background=Brushes.Black;IsHitTestVisible=false;
             introPath=Resolve(root,config.StartupIntroFile);idlePath=Resolve(root,config.StartupIdleFile);finalePath=Resolve(root,config.StartupFinaleFile);
         }
         private static string Resolve(string root,string relative)
@@ -323,6 +323,12 @@ namespace DragonLauncher
         }
         private Slot Create(string path,string role,bool front)
         {
+            var slot=CreateSlot(role);
+            Children.Add(slot.Media);SetZIndex(slot.Media,front?2:0);
+            slot.Media.Source=new Uri(path);slot.Media.Play();return slot;
+        }
+        private Slot CreateSlot(string role)
+        {
             var slot=new Slot {Role=role,LastAdvance=clock.Elapsed.TotalSeconds};
             slot.Media=new MediaElement {LoadedBehavior=MediaState.Manual,UnloadedBehavior=MediaState.Close,
                 Stretch=Stretch.Uniform,IsMuted=true,Volume=0,IsHitTestVisible=false,ScrubbingEnabled=true,SpeedRatio=1};
@@ -331,7 +337,7 @@ namespace DragonLauncher
                 slot.Opened=true;slot.OpenedAt=clock.Elapsed.TotalSeconds;
                 slot.LastAdvance=slot.OpenedAt;slot.LastPosition=slot.Media.Position.TotalSeconds;
                 slot.Duration=slot.Media.NaturalDuration.HasTimeSpan?slot.Media.NaturalDuration.TimeSpan.TotalSeconds:0;
-                if(slot.Duration<0.1 || slot.Duration>30 || slot.Media.NaturalVideoWidth<1){fail("启动素材时长或尺寸无效");return;}
+                if(slot.Duration<0.1 || slot.Duration>30 || slot.Media.NaturalVideoWidth<1){mediaFailure("启动素材时长或尺寸无效");return;}
                 if(slot!=active){slot.Media.Pause();slot.Media.Position=TimeSpan.Zero;}
                 log("Living media opened "+slot.Role+"; duration="+slot.Duration.ToString("F3",System.Globalization.CultureInfo.InvariantCulture));
             };
@@ -346,10 +352,19 @@ namespace DragonLauncher
                     log("Living idle loop "+(++loops)+"; speed=1");
                 } else if(slot.Role=="finale" && !handoffAcknowledged)fail("落泪结束前未完成客户端交接");
             };
-            slot.FailHandler=delegate(object sender,ExceptionRoutedEventArgs args){if(!disposed && !slot.Closed)fail("启动素材解码失败 "+slot.Role);};
+            slot.FailHandler=delegate(object sender,ExceptionRoutedEventArgs args){
+                if(disposed || slot.Closed)return;
+                Exception error=args==null?null:args.ErrorException;
+                string kind=error==null?"None":error is System.Runtime.InteropServices.COMException?"COMException":
+                    error is InvalidOperationException?"InvalidOperationException":error is IOException?"IOException":
+                    error is NotSupportedException?"NotSupportedException":"Other";
+                string safeRole=slot.Role=="intro"||slot.Role=="idle"||slot.Role=="finale"?slot.Role:"unknown";
+                log("Living media failure role="+safeRole+" exceptionType="+kind+" hresult="+
+                    (error==null?0:error.HResult).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                mediaFailure("启动素材解码失败 "+safeRole);
+            };
             slot.Media.MediaOpened+=slot.OpenHandler;slot.Media.MediaEnded+=slot.EndHandler;slot.Media.MediaFailed+=slot.FailHandler;
-            Children.Add(slot.Media);SetZIndex(slot.Media,front?2:0);
-            slot.Media.Source=new Uri(path);slot.Media.Play();return slot;
+            return slot;
         }
         private bool Warm(Slot slot)
         {
@@ -369,10 +384,10 @@ namespace DragonLauncher
             if(active==null)return;
             double position=active.Media.Position.TotalSeconds;
             if(position>active.LastPosition+0.003 || position<active.LastPosition-0.1){active.LastPosition=position;active.LastAdvance=now;}
-            if(!active.Opened && now>10){fail("启动视频解码器未能就绪");return;}
+            if(!active.Opened && now>10){mediaFailure("启动视频解码器未能就绪");return;}
             if(active.Role=="intro" && active.Ended && Warm(next)){SwitchToNext();log("Living idle entered; speed=1");}
-            if(active.Opened && now-active.LastAdvance>5){fail("启动视频解码停止超过五秒");return;}
-            if(next!=null && !next.Opened && now-active.OpenedAt>15)fail("下一段启动视频未能加载");
+            if(active.Opened && now-active.LastAdvance>5){mediaFailure("启动视频解码停止超过五秒");return;}
+            if(next!=null && !next.Opened && now-active.OpenedAt>15)mediaFailure("下一段启动视频未能加载");
         }
         internal bool TryStartFinale()
         {
@@ -451,10 +466,10 @@ namespace DragonLauncher
         // before the tear falls. Never turn the impact frame into a loading screen.
         private double preImpactGateStarted = -1, rateUpdatedAt = -1, playbackRate = 1;
         private bool preImpactReleased;
-        private bool livingFailed, userSkipped, resourceSkipped;
+        private bool livingFailed, userSkipped, resourceSkipped, mediaSkipped;
         private bool sessionEnding;
         private Application sessionApplication;
-        private bool AnimationSkipped {get{return userSkipped || resourceSkipped;}}
+        private bool AnimationSkipped {get{return userSkipped || resourceSkipped || mediaSkipped;}}
         private double lastFocusAttempt = -1;
         private int focusAttempts;
         private double lastPlacementWaitLog = -1;
@@ -479,7 +494,7 @@ namespace DragonLauncher
             surface = new Grid { Background = Brushes.Black };
             if (!String.IsNullOrEmpty(settings.StartupIntroFile)) {
                 living = new LivingFilmPlayback(AppDomain.CurrentDomain.BaseDirectory, settings, Log,
-                    delegate(string message) { FailLiving(message); });
+                    delegate(string message) { FailLiving(message); },OnLivingMediaFailure);
                 surface.Children.Add(living);
             } else surface.Children.Add(player);
             if(!(settings.RespectReducedMotion&&!SystemParameters.ClientAreaAnimation)){
@@ -717,6 +732,18 @@ namespace DragonLauncher
             if(gate==lastPreparationGate && elapsed-lastPreparationGateLog<5)return;
             lastPreparationGate=gate;lastPreparationGateLog=elapsed;
             Log("Living preparation gates; elapsedMs="+((long)(elapsed*1000))+"; "+gate);
+        }
+        private void OnLivingMediaFailure(string message)
+        {
+            if(done || cleaned)return;
+            if(preview){FailLiving(message);return;}
+            livingFailed=true;PlaybackSucceeded=false;HandoffSucceeded=false;
+            // A local WPF movie failure says nothing about the authenticated
+            // host/renderer. Preserve its bounded preparation and early reveal,
+            // using the same cleanup as a skipped optional animation. Host and
+            // layout failures continue through FailLiving and stay terminal.
+            Log("Living media fallback: optional animation skipped; wallpaper preparation continues");
+            SkipAnimationFrom("startup-media-failure");
         }
         private void FailLiving(string message,bool nativeFailure=false)
         {
@@ -1140,7 +1167,7 @@ namespace DragonLauncher
             if(done || cleaned)return false;
             if(preview){done=true;return true;}
             if(sessionEnding||Environment.HasShutdownStarted||Dispatcher.HasShutdownStarted)return false;
-            if(resourceProtection)resourceSkipped=true;else userSkipped=true;
+            if(resourceProtection)resourceSkipped=true;else if(source=="startup-media-failure")mediaSkipped=true;else userSkipped=true;
             HandoffSucceeded=false;
             // Skipping the optional movie is not a failed wallpaper preparation.
             // The Host retains an early reveal until its decoder is ready. Publish
@@ -1157,6 +1184,7 @@ namespace DragonLauncher
             Log("animation-skip source="+source+" wallpaperIntent="+(settings.ReplayTarget!=null?"preserve":!settings.WallpaperEnabled?"none":intent==1?"reveal":intent==-1?"disabled":"none")+
                 " activationRequested="+activationRequested);
             Log(resourceProtection ? "Startup animation released for resource protection; wallpaper preparation continues; no success finale" :
+                mediaSkipped ? "Startup animation released after local media failure; wallpaper preparation continues; no success finale" :
                 "Animation explicitly skipped; wallpaper preparation continues; no success finale");
             done=true;return true;
         }

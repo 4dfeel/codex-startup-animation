@@ -90,6 +90,24 @@ internal static class EarlyAnimationDismissalTests {
         else if(route=="pulse-close")pulse.Close();
         else if(route=="resource-protection")Invoke(film,"SkipAnimationCore",true);
         else if(route=="compatibility-fallback")Invoke(film,"LaunchClose");
+        else if(route.StartsWith("media-failure-",StringComparison.Ordinal)){
+            object living=Read(film,"living"),slot=Invoke(living,"CreateSlot",route.Substring("media-failure-".Length));
+            var media=(MediaElement)Read(slot,"Media");Write(living,"active",slot);
+            Check(media.Source==null,"actual media failure event fixture never starts a decoder");
+            var failure=(ExceptionRoutedEventArgs)Activator.CreateInstance(typeof(ExceptionRoutedEventArgs),
+                BindingFlags.Instance|BindingFlags.NonPublic,null,new object[]{MediaElement.MediaFailedEvent,media,
+                    new System.Runtime.InteropServices.COMException("PRIVATE_MEDIA_FAILURE_SENTINEL",unchecked((int)0xC00D36C4))},null);
+            // Exercise the real production MediaFailed event handler and its
+            // constructor-bound FilmSplash callback, with no video decoding.
+            media.RaiseEvent(failure);media.RaiseEvent(failure);
+        }
+        else if(route=="finale-handoff-failure"){
+            object living=Read(film,"living"),slot=Invoke(living,"CreateSlot","finale");
+            var media=(MediaElement)Read(slot,"Media");Write(living,"active",slot);
+            Check(media.Source==null,"actual finale end event fixture never starts a decoder");
+            media.RaiseEvent(new RoutedEventArgs(MediaElement.MediaEndedEvent));
+            media.RaiseEvent(new RoutedEventArgs(MediaElement.MediaEndedEvent));
+        }
         else Invoke(film,"SkipAnimation");
     }
     static void Cleanup(FilmSplash film){
@@ -99,6 +117,7 @@ internal static class EarlyAnimationDismissalTests {
     }
     static void Case(string media,string still,string route,bool late,bool terminal){
         string token=Guid.NewGuid().ToString("N"),observed=null,error=null;
+        bool expectedDisable=terminal||route=="finale-handoff-failure";
         FilmSplash film=null;PulseReveal pulse=null;int closing=0,closed=0,pulseClosing=0,pulseClosed=0;
         try{using(var peer=new Peer(token))using(var release=new ManualResetEvent(false)){
             film=Film(media);
@@ -122,9 +141,18 @@ internal static class EarlyAnimationDismissalTests {
             Check(closing==1&&closed==1,"real film Closing/Closed fire exactly once without recursion");
             if(pulse!=null){Check(pulseClosing==1&&pulseClosed==1,"real pulse Closing/Closed fire exactly once without recursion");Check(Read(film,"pulse")==null&&(bool)Read(pulse,"stopped"),"closed pulse released before film cleanup");}
             Check(!film.HandoffSucceeded&&!film.PlaybackSucceeded,"dismissal never claims successful handoff");
+            if(route.StartsWith("media-failure-",StringComparison.Ordinal)){
+                Check((bool)Read(film,"mediaSkipped")&&(bool)Read(film,"livingFailed"),"local movie failure records automatic fallback");
+                Check(!(bool)Read(film,"userSkipped")&&!(bool)Read(film,"resourceSkipped"),"automatic media failure is not classified as a user or pressure skip");
+                Check((string)typeof(FilmSplash).GetProperty("RevealCommand",Private).GetValue(film,null)=="reveal","media fallback never commits an unprepared finale");
+            }
+            if(route=="finale-handoff-failure"){
+                Check((bool)Read(film,"livingFailed"),"unacknowledged finale remains a handoff failure");
+                Check(!(bool)Read(film,"mediaSkipped")&&!(bool)Read(film,"userSkipped")&&!(bool)Read(film,"resourceSkipped"),"handoff failure never becomes an optional media skip");
+            }
             peer.Finish();observed=peer.Command;
-            Check(observed==(terminal?"disable":"reveal"),"expected "+(terminal?"disable":"reveal")+", observed "+observed);
-            Check((int)Read(film,"wallpaperRevealRequested")== (terminal?-1:1),"dismissal preserves explicit wallpaper intent");
+            Check(observed==(expectedDisable?"disable":"reveal"),"expected "+(expectedDisable?"disable":"reveal")+", observed "+observed);
+            Check((int)Read(film,"wallpaperRevealRequested")== (expectedDisable?-1:1),"dismissal preserves explicit wallpaper intent");
             Check((bool)Read(Read(film,"living"),"disposed")&&!(bool)Read(Read(film,"living"),"started"),"fixture never decodes and releases media controller");
         }}catch(Exception failure){error=failure.GetBaseException().Message;failures++;}
         finally{Cleanup(film);}
@@ -203,9 +231,11 @@ internal static class EarlyAnimationDismissalTests {
             var wait=Stopwatch.StartNew();
             while((bool)typeof(LauncherDiagnostics).GetField("running",BindingFlags.Static|BindingFlags.NonPublic).GetValue(null)&&wait.ElapsedMilliseconds<2000)Thread.Sleep(10);
             string text=File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"output","handoff-latest.log"));
-            foreach(string source in new[]{"keyboard","movie-button","pulse-button","window-close","resource-protection","compatibility-fallback"})
+            foreach(string source in new[]{"keyboard","movie-button","pulse-button","window-close","resource-protection","compatibility-fallback","startup-media-failure"})
                 Check(text.Contains("animation-skip source="+source+" wallpaperIntent=reveal activationRequested=True"),"fixed diagnostic source emitted: "+source);
             Check(text.Contains("wallpaperIntent=disabled activationRequested=True"),"terminal disabled intent diagnostic is explicit");
+            foreach(string role in new[]{"intro","idle","finale"})Check(text.Contains("Living media failure role="+role+" exceptionType=COMException hresult=-1072875836"),"bounded media failure evidence: "+role);
+            Check(!text.Contains("PRIVATE_MEDIA_FAILURE_SENTINEL"),"media exception message never enters diagnostics");
         }catch(Exception failure){error=failure.GetBaseException().Message;failures++;}
         results.Add(new {route="fixed-diagnostics",passed=error==null,error=error});
     }
@@ -224,6 +254,13 @@ internal static class EarlyAnimationDismissalTests {
                 BeforeActivationCase(media,still,route);
             }
             Case(media,still,"resource-protection",false,false);Case(media,still,"compatibility-fallback",false,false);
+            foreach(string role in new[]{"intro","idle","finale"}){
+                string route="media-failure-"+role;
+                Case(media,still,route,false,false);Case(media,still,route,true,false);
+                Case(media,still,route,false,true);Case(media,still,route,true,true);
+                BeforeActivationCase(media,still,route);
+            }
+            Case(media,still,"finale-handoff-failure",false,false);Case(media,still,"finale-handoff-failure",true,false);
             foreach(string guard in new[]{"done","preview","internal-failure","session-ending"}){
                 // System session state did not exist in R15. Its new guard is
                 // classified separately from the shared behavior regressions.

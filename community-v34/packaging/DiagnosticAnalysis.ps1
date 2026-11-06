@@ -172,7 +172,7 @@ function Get-CodexEarlyDismissalAnalysis($Report) {
     if($records -isnot [array] -or $records.Count -gt 512){return [pscustomobject]$result}
     $items=[Collections.Generic.List[object]]::new();$cutoff=-1L
     foreach($record in $records){
-        $category=Get-CodexAnalysisEnum $record 'category' @('launcher-stage','animation-skip','launcher-cleanup-complete','handoff-complete')
+        $category=Get-CodexAnalysisEnum $record 'category' @('launcher-stage','animation-skip','living-media-failed','launcher-cleanup-complete','handoff-complete')
         if($category -ceq 'unknown'){continue};$ticks=Get-CodexAnalysisUtc $record;if($ticks -lt 0){return [pscustomobject]$result}
         if($category -ceq 'launcher-stage' -and (Get-CodexAnalysisEnum $record 'stage' @('launcher-entry')) -ceq 'launcher-entry'){$cutoff=[Math]::Max($cutoff,$ticks)}
         $items.Add([pscustomobject]@{ticks=$ticks;category=$category;record=$record})
@@ -184,7 +184,7 @@ function Get-CodexEarlyDismissalAnalysis($Report) {
         $result.hasDismissal=$true
         $signatures=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal);$source='unknown';$intent='unknown';$activation=-1L
         foreach($item in ($skips|Where-Object {$_.ticks -eq $skips[0].ticks})){
-            $source=Get-CodexAnalysisEnum $item.record 'source' @('keyboard','movie-button','pulse-button','window-close','resource-protection','compatibility-fallback')
+            $source=Get-CodexAnalysisEnum $item.record 'source' @('keyboard','movie-button','pulse-button','window-close','resource-protection','compatibility-fallback','startup-media-failure')
             $intent=Get-CodexAnalysisEnum $item.record 'wallpaperIntent' @('reveal','disabled','preserve','none')
             $activation=Get-CodexAnalysisNumber $item.record 'activationRequested' 1
             [void]$signatures.Add(($source,$intent,$activation -join '|'))
@@ -192,10 +192,29 @@ function Get-CodexEarlyDismissalAnalysis($Report) {
         if($signatures.Count -ne 1){$lines.Add('本次动画结束记录冲突，不能选择其中一条确认来源或壁纸显示意图。')}
         elseif($source -ceq 'unknown' -or $intent -ceq 'unknown' -or $activation -lt 0){$lines.Add('本次动画结束记录字段不完整，不能确认来源或壁纸显示意图。')}
         else{
-            $sourcesText=@{'keyboard'='键盘跳过';'movie-button'='动画按钮';'pulse-button'='转场按钮';'window-close'='窗口关闭';'resource-protection'='资源保护';'compatibility-fallback'='兼容路径回退'}
+            $sourcesText=@{'keyboard'='键盘跳过';'movie-button'='动画按钮';'pulse-button'='转场按钮';'window-close'='窗口关闭';'resource-protection'='资源保护';'compatibility-fallback'='兼容路径回退';'startup-media-failure'='可选启动动画媒体错误自动降级'}
             $intentText=@{'reveal'='保留壁纸显示意图，准备可在动画结束后继续';'disabled'='保留已有禁用状态';'preserve'='保留现有壁纸会话状态';'none'='未请求壁纸显示'}
             $lines.Add(('本次动画提前结束：来源为{0}；{1}。这不是壁纸播放成功，仍须后续首帧、播放和样式证据。' -f $sourcesText[$source],$intentText[$intent]))
+            if($source -ceq 'startup-media-failure'){$lines.Add('这是可选启动动画解码或打开失败后的自动保护流程，不代表用户关闭动画；已降级不等于壁纸成功，真实宿主或身份校验失败仍须单独处理。')}
             $lines.Add(('动画结束时激活请求标记为 {0}；该标记不证明客户端已恢复或显示成功。' -f $activation))
+        }
+    }
+    $mediaFailures=@($current|Where-Object {$_.category -ceq 'living-media-failed'}|Sort-Object ticks -Descending)
+    if($mediaFailures.Count -gt 0){
+        $signatures=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal);$role='unknown';$exception='unknown';$hresult=0L;$hresultKnown=0L
+        foreach($item in ($mediaFailures|Where-Object {$_.ticks -eq $mediaFailures[0].ticks})){
+            $role=Get-CodexAnalysisEnum $item.record 'role' @('intro','idle','finale')
+            $exception=Get-CodexAnalysisEnum $item.record 'exceptionType' @('None','COMException','InvalidOperationException','IOException','NotSupportedException','Other')
+            $hresultKnown=Get-CodexAnalysisNumber $item.record 'hresultKnown' 1
+            $rawHresult=Get-CodexAnalysisValue $item.record 'hresult'
+            if(($rawHresult -is [int] -or $rawHresult -is [long]) -and $rawHresult -ge -2147483648L -and $rawHresult -le 2147483647L){$hresult=[long]$rawHresult}else{$hresultKnown=0L;$hresult=0L}
+            [void]$signatures.Add(($role,$exception,$hresultKnown,$hresult -join '|'))
+        }
+        if($signatures.Count -ne 1){$lines.Add('本次启动动画媒体失败记录冲突，不能确认片段、异常分类或 HRESULT。')}
+        elseif($role -ceq 'unknown' -or $exception -ceq 'unknown' -or $hresultKnown -ne 1){$lines.Add('本次启动动画媒体失败记录字段不完整，未采用原始异常文字或路径，不能确认解码错误细节。')}
+        else{
+            $rolesText=@{'intro'='开场';'idle'='等待循环';'finale'='落泪转场'}
+            $lines.Add(('本次可选启动动画媒体失败：片段为{0}；异常分类 {1}；HRESULT {2}。此记录不证明壁纸解码失败或播放成功。' -f $rolesText[$role],$exception,$hresult))
         }
     }
     $hostEvents=[Collections.Generic.List[object]]::new();$names=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)

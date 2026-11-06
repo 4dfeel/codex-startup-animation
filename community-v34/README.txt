@@ -1,5 +1,5 @@
 Codex Dragon — community startup animation and dynamic wallpaper
-ChatGPT 26.1029 adaptation: 34.16.1-chatgpt-26.1029 / 34.16.1.0
+ChatGPT 26.1029 adaptation: 34.16.2-chatgpt-26.1029 / 34.16.2.0
 
 This local fork adds strictly checked CSS-token support for the signed Store
 ChatGPT 26.1029.7803.0 UI. Install.ps1 -CreateDesktopShortcut creates the separate

@@ -17,7 +17,14 @@ uniqueness and ambiguity checks used by the previous renderer. Unknown layouts
 remain unsupported. Original media, transparency, timing and appearance
 probabilities are retained.
 
-The local build is identified as `34.16.1-chatgpt-26.1029` / `34.16.1.0`, so it
+Live testing also exposed a local WPF failure decoding the startup idle clip.
+The optional startup animation now skips safely on its own media failure while
+retaining the authenticated wallpaper preparation and reveal request, including
+when the host is still starting. Real host, identity and layout failures retain
+their existing failure behavior. This fallback does not change the media or
+install system codecs, and does not count as a successful animated handoff.
+
+The local build is identified as `34.16.2-chatgpt-26.1029` / `34.16.2.0`, so it
 can be distinguished from the unmodified upstream R16 package. Optional
 `-CreateDesktopShortcut` creates a separate `ChatGPT Dragon.lnk` pointing to
 the outer `Launch.exe`.
@@ -76,6 +83,12 @@ The current-layout regression passed 135 checks, the legacy layout regression
 166, shell routes 163, transitions 40 and quality 8 (512 total). These use a
 fresh offline browser profile, synthetic shell markup and the original packaged
 ambient video. They do not access a real ChatGPT session.
+
+After the first live launch exposed the optional WPF idle decode failure,
+539 animation-dismissal, 485 early-reveal-host and 105 resource-protection
+checks passed. This includes a late target/host and a real local media failure
+callback, while an unacknowledged finale handoff remains terminal. Diagnostic
+regressions passed 82 dismissal, 133 analysis and 33 end-to-end privacy checks.
 
 All 200 files in the adapted build and all four .NET Framework 4.8 assemblies
 passed the package check, including read-only verification of the registered

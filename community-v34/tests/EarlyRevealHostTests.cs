@@ -27,6 +27,7 @@ internal static class EarlyRevealHostTests {
         internal Fixture Owner;
         internal Action<Request> Before;
         internal volatile bool AllowPrepared,Attached,Revealed,Disposed,ManualPause;
+        internal volatile bool TargetsAvailable=true;
         internal long Generation;
         internal string Document;
         readonly Dictionary<string,int> counts=new Dictionary<string,int>();
@@ -48,7 +49,7 @@ internal static class EarlyRevealHostTests {
                 "recoveryNeeded",false,"recoveryStable",false,"recoveryReason","","rendererClockMs",1000,"dormant",false,"memoryPressure",false);
         }
         void Respond(Request request){switch(request.Kind){
-            case "discover":Reply(request,Json.Obj("targetInfos",new object[]{Json.Obj("targetId","owned_target","type","page","url","app://-/index.html")}),true);break;
+            case "discover":Reply(request,Json.Obj("targetInfos",TargetsAvailable?new object[]{Json.Obj("targetId","owned_target","type","page","url","app://-/index.html")}:new object[0]),true);break;
             case "target-attach":Reply(request,Json.Obj("sessionId","owned_session"),true);break;
             case "root":Reply(request,Json.Obj("rootReady",true,"bodyReady",true));break;
             case "preflight":Reply(request,Json.Obj("namespaceFree",true,"ownNodeCount",0));break;
@@ -142,6 +143,18 @@ internal static class EarlyRevealHostTests {
         f.NoRepeatedMutations();f.Stop();Check(f.Failure==null&&f.Peer.Count("dispose")==1,"ordinary shutdown disposes one owned renderer");
         cases.Add(new{name=beforeStart?"reveal-before-host-prepare":"reveal-during-first-frame-prepare",passed=true});
     }}
+    static void RevealBeforeTargetReady(string directory){using(var f=new Fixture(directory)){
+        f.Peer.TargetsAvailable=false;f.Start();
+        Check(Until(()=>f.Peer.Count("discover")>=1,1500),"cold browser initially reports no page targets");
+        f.State.Command("reveal");
+        lock(f.State.Gate)Check(f.State.RequestedReveal&&!f.State.Disabled,"local movie failure reveal is retained during target discovery");
+        Check(f.Peer.Count("target-attach")==0&&f.Peer.Count("reveal")==0,"no target means no attachment or claimed reveal");
+        f.Peer.TargetsAvailable=true;f.WaitPreparing();f.Allow();
+        Check(Until(()=>f.State.Ready&&f.State.Playing&&f.State.WallpaperApplied&&f.State.FirstFrameConfirmed,2500),"late target and decoder consume retained media-fallback reveal");
+        Check(f.Peer.Count("discover")>=2&&f.Peer.Count("target-attach")==1&&f.Peer.Count("reveal")==1,"late-ready discovery does not duplicate attachment or reveal");
+        f.NoRepeatedMutations();f.Stop();Check(f.Failure==null,"late target fallback exits cleanly after explicit disable");
+        cases.Add(new{name="media-fallback-reveal-before-browser-target-exists",passed=true});
+    }}
     static void DisableCases(string directory){
         using(var f=new Fixture(directory)){
             f.State.Command("disable");f.State.Command("reveal");f.Start();Check(Until(()=>f.Ended,2000),"disable-before-reveal controller exits");
@@ -206,7 +219,7 @@ internal static class EarlyRevealHostTests {
     }
     static int Main(string[] args){try{
         string directory=Path.GetFullPath(args[0]);Directory.CreateDirectory(directory);var watch=Stopwatch.StartNew();
-        EarlyReveal(directory,true);EarlyReveal(directory,false);DisableCases(directory);ContextInvalidation(directory);ReadyBoundary(directory);PreparationBound(directory);
+        EarlyReveal(directory,true);EarlyReveal(directory,false);RevealBeforeTargetReady(directory);DisableCases(directory);ContextInvalidation(directory);ReadyBoundary(directory);PreparationBound(directory);
         Console.WriteLine(Json.Serializer().Serialize(new{passed=true,checks=checks,elapsedMs=watch.ElapsedMilliseconds,actualCodexStarted=false,nativeWindowsShown=false,mediaDecoded=false,realMemoryPressureCreated=false,realHostStateAndWallpaperSession=true,syntheticRendererPeer=true,cases=cases}));return 0;
     }catch(Exception error){Console.WriteLine("FAIL: "+error);return 1;}}
 }

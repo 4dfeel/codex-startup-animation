@@ -12,12 +12,13 @@ function Check([bool]$Value,[string]$Name){if(-not $Value){throw ('FAIL '+$Name)
 function Stamp([int]$Second){return ([datetime]::new(2026,1,1,12,0,0,[DateTimeKind]::Utc)).AddSeconds($Second).ToString('o')}
 function Entry([int]$Second){return [pscustomobject]@{utc=(Stamp $Second);category='launcher-stage';stage='launcher-entry'}}
 function Skip([int]$Second,[string]$Source='movie-button',[string]$Intent='reveal',[string]$Activation='True'){return Convert-FixLogEvent ((Stamp $Second)+' animation-skip source='+$Source+' wallpaperIntent='+$Intent+' activationRequested='+$Activation) 'output/handoff-latest.log'}
+function MediaFailure([int]$Second,[string]$Role='idle',[string]$Exception='COMException',[string]$Hresult='-1072885852'){return Convert-FixLogEvent ((Stamp $Second)+' Living media failure role='+$Role+' exceptionType='+$Exception+' hresult='+$Hresult) 'output/handoff-latest.log'}
 function Phase([int]$Second,[int]$Phase,[int]$Code=0,[int]$Run=1){return [pscustomobject]@{utc=(Stamp $Second);category='host-phase';phase=$Phase;code=$Code;hostRunOrdinal=$Run}}
 function Layout([int]$Second){$r=Phase $Second 38;$r|Add-Member sourcePhase 6;$r|Add-Member layoutSupported 0;$r|Add-Member layoutReason 'main-count';return $r}
 function Report($Launcher,$HostEvents=@()){return [pscustomobject]@{logs=@([pscustomobject]@{log='output/handoff-latest.log';records=@($Launcher)},[pscustomobject]@{log='output/wallpaper-readiness.log';records=@($HostEvents)})}}
 $sample=Skip 2
 Check ($null -ne $sample -and $sample.category -ceq 'animation-skip' -and $sample.source -ceq 'movie-button' -and $sample.wallpaperIntent -ceq 'reveal' -and $sample.activationRequested -eq 1) 'fixed dismissal fields retained'
-foreach($source in @('keyboard','movie-button','pulse-button','window-close','resource-protection','compatibility-fallback')){Check ((Skip 2 $source).source -ceq $source) ('source enum '+$source)}
+foreach($source in @('keyboard','movie-button','pulse-button','window-close','resource-protection','compatibility-fallback','startup-media-failure')){Check ((Skip 2 $source).source -ceq $source) ('source enum '+$source)}
 foreach($intent in @('reveal','disabled','preserve','none')){Check ((Skip 2 'keyboard' $intent).wallpaperIntent -ceq $intent) ('intent enum '+$intent)}
 $line=(Stamp 2)+' animation-skip source=window-close wallpaperIntent=reveal activationRequested=True'
 $private=Convert-FixLogEvent ($line+' title=PRIVATE_TITLE key=PRIVATE_KEY path=PRIVATE_PATH token=PRIVATE_TOKEN pid=432123') 'output/handoff-latest.log'
@@ -79,5 +80,42 @@ $text=Get-CodexDiagnosticAnalysis (Report $current @((Phase 1 20),(Layout 2),$pl
 Check ($text.Contains('当时确认了首帧') -and $text.Contains('保留壁纸显示意图')) 'late actual playback after dismissal is independently recognized'
 $text=Get-CodexDiagnosticAnalysis (Report $current @((Phase -10 20),$playing)) $null
 Check (-not $text.Contains('当时确认了首帧') -and $text.Contains('未把旧宿主播放')) 'old continuing host playback cannot confirm new dismissal'
+$media=MediaFailure 2
+Check ($media.category -ceq 'living-media-failed' -and $media.role -ceq 'idle' -and $media.exceptionType -ceq 'COMException' -and $media.hresult -eq -1072885852 -and $media.hresultKnown -eq 1) 'media failure fixed projection'
+foreach($role in @('intro','idle','finale')){Check ((MediaFailure 2 $role).role -ceq $role) ('media role enum '+$role)}
+foreach($exception in @('None','COMException','InvalidOperationException','IOException','NotSupportedException','Other')){Check ((MediaFailure 2 'idle' $exception).exceptionType -ceq $exception) ('media exception enum '+$exception)}
+foreach($hresult in @('-2147483648','-1','0','2147483647')){$r=MediaFailure 2 'idle' 'Other' $hresult;Check ($r.hresultKnown -eq 1 -and $r.hresult -eq [long]$hresult) ('signed int32 HRESULT '+$hresult)}
+foreach($hresult in @('-2147483649','2147483648','1.5','0xC00D36C4','PRIVATE','-1 hresult=0','')){Check ((MediaFailure 2 'idle' 'Other' $hresult).hresultKnown -eq 0) ('invalid or duplicate HRESULT rejected '+$hresult)}
+$mediaLine=(Stamp 2)+' Living media failure role=idle exceptionType=COMException hresult=-1072885852'
+$privateMedia=Convert-FixLogEvent ($mediaLine+' message=PRIVATE_MESSAGE path=C:\Users\PRIVATE token=PRIVATE_TOKEN') 'output/handoff-latest.log'
+Check (($privateMedia|ConvertTo-Json -Compress) -notmatch 'PRIVATE|message|path|token') 'media failure excludes raw exception and path'
+$malformedMedia=Convert-FixLogEvent ($mediaLine+' role=PRIVATE exceptionType=PRIVATE') 'output/handoff-latest.log'
+Check ($malformedMedia.role -ceq 'unknown' -and $malformedMedia.exceptionType -ceq 'unknown') 'media duplicate and private enums unknown'
+foreach($source in @('diagnostics/portable-launch.log','output/wallpaper-readiness.log','output/launcher-error.txt')){Check ($null -eq (Convert-FixLogEvent $mediaLine $source)) ('media wrong source rejected '+$source)}
+$fallbackLine=(Stamp 3)+' Living media fallback: optional animation skipped; wallpaper preparation continues'
+Check ((Convert-FixLogEvent $fallbackLine 'output/handoff-latest.log').category -ceq 'living-media-fallback') 'fixed media fallback recognized'
+Check ($null -eq (Convert-FixLogEvent ($fallbackLine+' PRIVATE') 'output/handoff-latest.log')) 'media fallback requires exact text'
+$mediaCurrent=@((Entry 0),$media,(Skip 3 'startup-media-failure'))
+$text=Get-CodexDiagnosticAnalysis (Report $mediaCurrent) $null
+Check ($text.Contains('自动降级') -and $text.Contains('不代表用户关闭动画') -and $text.Contains('已降级不等于壁纸成功') -and $text.Contains('保留壁纸显示意图') -and -not $text.Contains('当时确认了首帧')) 'optional media fallback never implies user action or wallpaper success'
+Check ($text.Contains('等待循环') -and $text.Contains('COMException') -and $text.Contains('-1072885852')) 'media analysis keeps only fixed role type and HRESULT'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),$malformedMedia,(Skip 3 'startup-media-failure'))) $null
+Check ($text.Contains('媒体失败记录字段不完整') -and -not $text.Contains('PRIVATE')) 'malformed media analysis safe'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),(MediaFailure 2 'PRIVATE' 'PRIVATE' 'PRIVATE'))) $null
+Check ($text.Contains('媒体失败记录字段不完整') -and -not $text.Contains('PRIVATE')) 'unknown media values never echoed'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),$media,(MediaFailure 2 'intro'))) $null
+Check ($text.Contains('媒体失败记录冲突') -and -not $text.Contains('HRESULT -1072885852')) 'same time media conflict stays unknown'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),$media,$media)) $null
+Check ($text.Contains('HRESULT -1072885852') -and -not $text.Contains('媒体失败记录冲突')) 'same media record duplicate harmless'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),$media,(Skip 3 'startup-media-failure'),(Entry 10))) $null
+Check (-not $text.Contains('自动降级') -and -not $text.Contains('媒体失败：')) 'new startup excludes old media fallback'
+Check (-not (Get-CodexDiagnosticAnalysis (Report @($media)) $null).Contains('媒体失败：')) 'unassociated media failure is not current proof'
+Check (-not (Get-CodexDiagnosticAnalysis (Report @((Entry 0)) @($media)) $null).Contains('媒体失败：')) 'host stream cannot inject media failure'
+$text=Get-CodexDiagnosticAnalysis (Report $mediaCurrent @((Phase 1 20),(Phase 6 6 166),(Phase 7 15 166))) $null
+Check ($text.Contains('最新有效记录：页面布局未满足') -and $text.Contains('已降级不等于壁纸成功')) 'real host failure survives optional media fallback'
+$text=Get-CodexDiagnosticAnalysis (Report $mediaCurrent @((Phase 1 20),$playing)) $null
+Check ($text.Contains('当时确认了首帧') -and $text.Contains('已降级不等于壁纸成功')) 'independent playback proof can follow optional media failure'
+$forged=MediaFailure 2;$forged.hresult='PRIVATE';$forged.hresultKnown=1
+Check ((Get-CodexDiagnosticAnalysis (Report @((Entry 0),$forged)) $null).Contains('媒体失败记录字段不完整')) 'analysis rechecks numeric HRESULT type'
 [IO.File]::WriteAllText((Join-Path $WorkRoot 'results.json'),(@{passed=$true;checks=$checks}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 Write-Output ('ALL PASS: early dismissal diagnostics '+$checks)

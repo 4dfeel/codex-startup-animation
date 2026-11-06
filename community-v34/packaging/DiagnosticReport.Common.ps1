@@ -106,10 +106,25 @@ function Convert-FixHandoff([string]$Body,[string]$Utc) {
     $fields=[ordered]@{utc=$Utc}
     if($Body.StartsWith('animation-skip source=',[StringComparison]::Ordinal)){
         $fields.category='animation-skip'
-        $fields.source=Get-FixEventEnum $Body 'source' @('keyboard','movie-button','pulse-button','window-close','resource-protection','compatibility-fallback')
+        $fields.source=Get-FixEventEnum $Body 'source' @('keyboard','movie-button','pulse-button','window-close','resource-protection','compatibility-fallback','startup-media-failure')
         $fields.wallpaperIntent=Get-FixEventEnum $Body 'wallpaperIntent' @('reveal','disabled','preserve','none')
         $fields.activationRequested=Get-FixEventBoolean $Body 'activationRequested'
         return [pscustomobject]$fields
+    }
+    if($Body.StartsWith('Living media failure role=',[StringComparison]::Ordinal)){
+        # Never retain the exception message, source path, arbitrary type name,
+        # or extra fields. A signed HRESULT has a separate validity bit because
+        # -1 is both a valid int32 value and the older numeric unknown sentinel.
+        $fields.category='living-media-failed'
+        $fields.role=Get-FixEventEnum $Body 'role' @('intro','idle','finale')
+        $fields.exceptionType=Get-FixEventEnum $Body 'exceptionType' @('None','COMException','InvalidOperationException','IOException','NotSupportedException','Other')
+        $token=Get-FixEventToken $Body 'hresult';$number=0
+        $fields.hresultKnown=0L;$fields.hresult=0L
+        if($null -ne $token -and $token -cmatch '^-?[0-9]{1,10}$' -and [int]::TryParse($token,[ref]$number)){$fields.hresultKnown=1L;$fields.hresult=[long]$number}
+        return [pscustomobject]$fields
+    }
+    if($Body -ceq 'Living media fallback: optional animation skipped; wallpaper preparation continues'){
+        return [pscustomobject]@{utc=$Utc;category='living-media-fallback'}
     }
     if($Body.StartsWith('warm-start decision=',[StringComparison]::Ordinal)){
         $fields.category='warm-start'
