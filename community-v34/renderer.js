@@ -103,8 +103,8 @@ html[data-codex-dragon-background="v1"] #root main._MainContentSurface_yl8z4_2[d
 html[data-codex-dragon-background="v1"] #root main._MainContentSurface_yl8z4_2[data-app-shell-main-surface="default"] > ._WorkspaceContent_yl8z4_2 [data-thread-scroll-footer="true"]:has([data-thread-focus-mode]) { background-color: transparent !important; }
 #codex-dragon-stage-v1 { position: absolute; inset: 0; z-index: -20; pointer-events: none; overflow: hidden; background: var(--color-surface, #101518); contain: strict; }
 #codex-dragon-stage-v1 video { width: 100%; height: 100%; object-fit: cover; object-position: right center; opacity: 0; }
-#codex-dragon-stage-v1[data-ready="true"] video { opacity: .26; animation: codex-dragon-reveal-v1 650ms ease both; }
-@keyframes codex-dragon-reveal-v1 { from { opacity: 0; } to { opacity: .26; } }
+#codex-dragon-stage-v1[data-ready="true"] video { opacity: .44; animation: codex-dragon-reveal-v1 650ms ease both; }
+@keyframes codex-dragon-reveal-v1 { from { opacity: 0; } to { opacity: .44; } }
 #codex-dragon-stage-v1[data-probe="true"] { position: fixed; inset: auto 0 0 auto; z-index: 0; width: 1px; height: 1px; background: transparent; }
 #codex-dragon-stage-v1[data-probe="true"]::after { display: none; }
 #codex-dragon-stage-v1::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--color-surface, #101518) 25%, transparent), color-mix(in srgb, var(--color-surface, #101518) 28%, transparent) 56%, color-mix(in srgb, var(--color-surface, #101518) 12%, transparent)); }

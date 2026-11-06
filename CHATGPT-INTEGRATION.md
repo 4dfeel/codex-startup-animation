@@ -160,3 +160,9 @@ use the GUI subsystem and the host starts with CreateNoWindow=true. The existing
 desktop shortcut was restored to the previously verified H: installation 34.16.4.
 Its first-click startup correction remains; brief backend console flashes remain
 unresolved. No official-client files or security checks were changed.
+
+## Stronger wallpaper (34.16.6)
+
+Based on the restored 34.16.4 runtime, the ready-state video opacity and reveal
+animation endpoint increase from 0.26 to 0.44. Composer, navigation and text
+styles remain unchanged. The withdrawn console experiment is not included.
