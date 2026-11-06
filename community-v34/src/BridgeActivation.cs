@@ -510,12 +510,6 @@ namespace DragonLauncher
             byte[] bytes=new byte[16];using(var rng=RandomNumberGenerator.Create())rng.GetBytes(bytes);
             var text=new StringBuilder();foreach(byte b in bytes)text.Append(b.ToString("x2",CultureInfo.InvariantCulture));return text.ToString();
         }
-        // WallpaperHost is a console-subsystem helper started hidden from this
-        // GUI launcher. Electron can attach to that already-hidden console and
-        // its console workers inherit it instead of opening visible consoles.
-        // Never AllocConsole then hide: creation must be hidden from the start.
-        internal static ProcessStartInfo HiddenHostStartInfo(string file,string arguments,string root)
-        {return new ProcessStartInfo(file,arguments){UseShellExecute=false,CreateNoWindow=false,WindowStyle=ProcessWindowStyle.Hidden,WorkingDirectory=root};}
         private static bool Supported(Settings settings)
         {return settings.WallpaperEnabled && string.IsNullOrWhiteSpace(settings.Exe) && string.Equals(settings.AppId,"OpenAI.Codex_2p2nqsd0c76g0!App",StringComparison.OrdinalIgnoreCase);}
         internal static uint WindowProcessId(IntPtr window)
@@ -579,8 +573,9 @@ namespace DragonLauncher
                 if(!File.Exists(file))return OpenOrdinary(result,ordinary,"wallpaper-host-missing");
                 string session=NewSession();
                 try {
-                    phase=5;host=Process.Start(HiddenHostStartInfo(file,"--launch --session "+session,root));
-
+                    phase=5;host=Process.Start(new ProcessStartInfo(file,"--launch --session "+session) {
+                        UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden,WorkingDirectory=root
+                    });
                 }catch(Exception error){diagnosticFailure=error;return OpenOrdinary(result,ordinary,"wallpaper-host-start-failed");}
                 if(host==null)throw new InvalidOperationException("bridge-launch-no-handle");
                 if(testObserveSpawn!=null)testObserveSpawn(host);

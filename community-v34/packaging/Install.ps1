@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$Destination='H:\Apps\ChatGPTDragon-34.16.5',
+    [string]$Destination='H:\Apps\ChatGPTDragon-34.16.4',
     [switch]$CreateDesktopShortcut,
     [switch]$BindOfficialDesktopShortcut,
     [switch]$SkipConfiguration
