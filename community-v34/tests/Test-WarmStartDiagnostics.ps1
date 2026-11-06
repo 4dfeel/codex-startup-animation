@@ -108,5 +108,11 @@ $text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),(Route 1 'cold' 'retiring-
 Check ($text.Contains('路由字段相互矛盾')) 'unverified host cannot claim a retired cold route'
 $text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),(Route 1 'wait' 'retiring-host' 'retiring' 0)) $oldHost) $null
 Check (-not $text.Contains('当时确认了首帧')) 'old host playback cannot establish progress during retirement'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),(Route 1 'activate' 'no-window' 'unavailable' 1),(Route 4 'cold' 'activated-client-exited' 'unavailable' 1))) $null
+Check ($text.Contains('冷启动') -and -not $text.Contains('路由字段不完整')) 'completed activation and verified exit is a fresh cold route'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),(Route 1 'cold' 'activated-client-exited' 'unavailable' 0))) $null
+Check ($text.Contains('路由字段相互矛盾')) 'new cold route requires a completed activation request'
+$text=Get-CodexDiagnosticAnalysis (Report @((Entry 0),(Route 1 'unavailable' 'activated-client-exited' 'unavailable' 1))) $null
+Check ($text.Contains('路由字段相互矛盾')) 'new reason is not accepted under an unrelated decision'
 [IO.File]::WriteAllText((Join-Path $WorkRoot 'results.json'),(@{passed=$true;checks=$checks}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 Write-Output ('ALL PASS: warm-start diagnostics '+$checks)

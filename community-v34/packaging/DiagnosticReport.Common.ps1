@@ -129,7 +129,7 @@ function Convert-FixHandoff([string]$Body,[string]$Utc) {
     if($Body.StartsWith('warm-start decision=',[StringComparison]::Ordinal)){
         $fields.category='warm-start'
         $fields.decision=Get-FixEventEnum $Body 'decision' @('cold','replay','activate','needs-exit','cancelled','unavailable','wait')
-        $fields.reason=Get-FixEventEnum $Body 'reason' @('no-running','existing-window','window-recovered','no-window','activation-timeout','activation-failed','window-timeout','observation-timeout','identity-unavailable','target-ended','host-unavailable','manual-retry-running','manual-retry-cold','user-cancelled','animation-only','retiring-host','retiring-exited','retiring-window','retiring-timeout')
+        $fields.reason=Get-FixEventEnum $Body 'reason' @('no-running','existing-window','window-recovered','no-window','activation-timeout','activation-failed','window-timeout','observation-timeout','identity-unavailable','target-ended','host-unavailable','manual-retry-running','manual-retry-cold','user-cancelled','animation-only','retiring-host','retiring-exited','retiring-window','retiring-timeout','activated-client-exited')
         $fields.elapsedMs=Get-FixEventNumber $Body 'elapsedMs' 31536000000 0
         $fields.activationCount=Get-FixEventNumber $Body 'activationCount' 1 0
         $fields.hostState=Get-FixEventEnum $Body 'hostState' @('unchecked','unavailable','unverified','managed','disabled','paused','faulted','animation-only','retiring')

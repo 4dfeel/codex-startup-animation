@@ -122,7 +122,7 @@ function Get-CodexWarmStartEvidence($Report) {
         $decision='unknown';$reason='unknown';$hostState='unknown';$elapsed=-1L;$activations=-1L
         foreach($item in ($routes|Where-Object {$_.ticks -eq $routeAt})){
             $decision=Get-CodexAnalysisEnum $item.record 'decision' @('cold','replay','activate','needs-exit','cancelled','unavailable','wait')
-            $reason=Get-CodexAnalysisEnum $item.record 'reason' @('no-running','existing-window','window-recovered','no-window','activation-timeout','activation-failed','window-timeout','observation-timeout','identity-unavailable','target-ended','host-unavailable','manual-retry-running','manual-retry-cold','user-cancelled','animation-only','retiring-host','retiring-exited','retiring-window','retiring-timeout')
+            $reason=Get-CodexAnalysisEnum $item.record 'reason' @('no-running','existing-window','window-recovered','no-window','activation-timeout','activation-failed','window-timeout','observation-timeout','identity-unavailable','target-ended','host-unavailable','manual-retry-running','manual-retry-cold','user-cancelled','animation-only','retiring-host','retiring-exited','retiring-window','retiring-timeout','activated-client-exited')
             $hostState=Get-CodexAnalysisEnum $item.record 'hostState' @('unchecked','unavailable','unverified','managed','disabled','paused','faulted','animation-only','retiring')
             $elapsed=Get-CodexAnalysisNumber $item.record 'elapsedMs' 31536000000
             $activations=Get-CodexAnalysisNumber $item.record 'activationCount' 1
@@ -131,8 +131,8 @@ function Get-CodexWarmStartEvidence($Report) {
         $result.suppressState=$true
         if($signatures.Count -ne 1){$result.lines=@('本次启动路由记录冲突，不能选其中一条确认激活、宿主接入或播放；未采用旧宿主播放证明。');return [pscustomobject]$result}
         if($decision -ceq 'unknown' -or $reason -ceq 'unknown' -or $hostState -ceq 'unknown' -or $elapsed -lt 0 -or $activations -lt 0){$result.lines=@('本次启动路由字段不完整，无法确认激活或壁纸会话；未采用较早路由或旧宿主播放证明。');return [pscustomobject]$result}
-        $reasonPairs=@{'cold'=@('no-running','manual-retry-cold','retiring-exited');'wait'=@('retiring-host');'replay'=@('existing-window','window-recovered','animation-only');'activate'=@('no-window');'needs-exit'=@('host-unavailable','manual-retry-running');'cancelled'=@('user-cancelled');'unavailable'=@('activation-timeout','activation-failed','window-timeout','observation-timeout','identity-unavailable','target-ended','retiring-window','retiring-timeout')}
-        if($reason -cnotin $reasonPairs[$decision] -or ($decision -ceq 'activate' -and $activations -ne 1) -or ($reason -clike 'retiring-*' -and ($activations -ne 0 -or $hostState -cne 'retiring'))){$result.lines=@('本次启动路由字段相互矛盾，无法确认激活或壁纸会话；未采用较早路由或旧宿主播放证明。');return [pscustomobject]$result}
+        $reasonPairs=@{'cold'=@('no-running','manual-retry-cold','retiring-exited','activated-client-exited');'wait'=@('retiring-host');'replay'=@('existing-window','window-recovered','animation-only');'activate'=@('no-window');'needs-exit'=@('host-unavailable','manual-retry-running');'cancelled'=@('user-cancelled');'unavailable'=@('activation-timeout','activation-failed','window-timeout','observation-timeout','identity-unavailable','target-ended','retiring-window','retiring-timeout')}
+        if($reason -cnotin $reasonPairs[$decision] -or ($decision -ceq 'activate' -and $activations -ne 1) -or ($reason -ceq 'activated-client-exited' -and $activations -ne 1) -or ($reason -clike 'retiring-*' -and ($activations -ne 0 -or $hostState -cne 'retiring'))){$result.lines=@('本次启动路由字段相互矛盾，无法确认激活或壁纸会话；未采用较早路由或旧宿主播放证明。');return [pscustomobject]$result}
         switch($decision){
             'wait' {$lines.Add('本次启动路由：正在等待已经失去页面的旧客户端和同目录宿主自行退出；尚未请求激活或确认新的壁纸播放。')}
             'cold' {$lines.Add('本次启动路由：冷启动；当次检查未发现仍需复用的官方进程，后续仍须新宿主、首帧和播放证据。');$result.suppressState=$false}

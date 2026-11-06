@@ -53,7 +53,7 @@ internal static class ExistingClientStartupTests {
         }
         f=new Fixture();f.FindBehavior=n=>n<4?null:f.Window;r=f.Run();
         Check(r.Decision==WarmStartupDecision.Replay&&r.Reason=="window-recovered","background/orphan hint can recover a verified window");
-        Check(f.Activations==1&&f.RunningChecks==1&&f.Finds==4,"recovery sends one activation and only observes thereafter");
+        Check(f.Activations==1&&f.RunningChecks>=1&&f.Finds==4,"recovery sends one activation and only observes thereafter");
         Check(f.ActivationBudgets[0]<=4000&&f.Now<=8000,"activation and observations fit original deadline");
         f=new Fixture();f.FindBehavior=n=>null;r=f.Run();
         Check(r.Decision==WarmStartupDecision.Unavailable&&r.Reason=="window-timeout","persistent background cannot become cold fallback");
@@ -98,6 +98,28 @@ internal static class ExistingClientStartupTests {
         // a route decision; existing Host performs both locked running checks.
         f=new Fixture();f.FindBehavior=n=>null;f.RunningBehavior=n=>false;r=f.Run();
         Check(r.Target==null&&f.Activations==0&&f.RunningChecks==1,"cold race remains delegated to existing locked host guard");
+    }
+    static void CompletedActivationExitCases(){
+        // Reproduce the recorded 20.9s click, old 23.7s exit and 28.9s timeout:
+        // a foreign installation has no discoverable pipe in the new directory.
+        var f=new Fixture();f.FindBehavior=n=>null;f.RunningBehavior=n=>f.Now<2800;
+        f.Hooks.InspectBackgroundHost=scope=>WarmHostState.Unavailable;
+        var r=f.Run();
+        Check(r.Decision==WarmStartupDecision.Cold&&r.Reason=="activated-client-exited","completed activation then old-process exit continues the same click as cold");
+        Check(f.Activations==1&&f.Prompts==0&&f.Clears==1&&f.Now>=2900&&f.Now<8000,"recorded cross-install timeline needs no second click or modal");
+        f=new Fixture();f.FindBehavior=n=>null;f.RunningBehavior=n=>n==1;
+        r=f.Run();Check(r.Decision==WarmStartupDecision.Cold&&f.RunningChecks==3,"cold requires two fresh post-activation absence observations");
+        f=new Fixture();f.FindBehavior=n=>null;f.RunningBehavior=n=>n!=2;
+        r=f.Run();Check(r.Decision!=WarmStartupDecision.Cold&&f.Clears==0,"one transient absence followed by a live official process cannot authorize cold");
+        f=new Fixture();f.FindBehavior=n=>n<3?null:f.Window;f.RunningBehavior=n=>n==1;
+        r=f.Run();Check(r.Decision==WarmStartupDecision.Replay&&f.Clears==0,"a new verified window between absence samples supersedes the cold candidate");
+        f=new Fixture();f.FindBehavior=n=>null;f.RunningBehavior=n=>{if(n>1)throw new InvalidOperationException();return true;};
+        r=f.Run();Check(r.Reason=="identity-unavailable"&&f.Clears==0&&f.Activations==1,"post-activation identity uncertainty never authorizes cold");
+        foreach(bool timeout in new[]{false,true}){
+            f=new Fixture();f.FindBehavior=n=>null;f.RunningBehavior=n=>n==1;
+            f.ActivationBehavior=budget=>{if(timeout)throw new TimeoutException();throw new InvalidOperationException();};
+            r=f.Run();Check(r.Decision==WarmStartupDecision.Unavailable&&f.RunningChecks==1&&f.Clears==0,"failed or timed-out activation cannot enter automatic cold "+timeout);
+        }
     }
     static void RetiringCases(){
         var f=new Fixture();f.FindBehavior=n=>null;
@@ -242,7 +264,7 @@ internal static class ExistingClientStartupTests {
                 try{NativeSuite(args[1]);File.WriteAllText(args[2],"{\"passed\":true,\"checks\":"+checks+",\"privateNonInputDesktop\":true}");return 0;}
                 catch(Exception error){File.WriteAllText(args[2],error.Message);return 1;}
             }
-            DecisionCases();RetiringCases();HostStatusCases();LateObservationCase();LateActivationCases();NativeParent(Path.Combine(args[0],"native-results.json"));
+            DecisionCases();CompletedActivationExitCases();RetiringCases();HostStatusCases();LateObservationCase();LateActivationCases();NativeParent(Path.Combine(args[0],"native-results.json"));
             Console.WriteLine("{\"passed\":true,\"checks\":"+checks+",\"actualCodexStarted\":false,\"syntheticDecisionsAndPrivateDesktop\":true}");return 0;
         }catch(Exception error){Console.WriteLine("FAIL: "+error);return 1;}
     }

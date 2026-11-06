@@ -131,9 +131,19 @@ namespace DragonLauncher
                     try{hooks.Activate(budget);}
                     catch(Exception error){return Result(hooks,log,started,activations,host,WarmStartupDecision.Unavailable,
                         error.GetBaseException() is TimeoutException?"activation-timeout":"activation-failed");}
+                    bool absentAfterCompletedActivation=false;
                     while(Remaining(deadline,hooks.Elapsed())>0){
                         target=Observe(hooks,deadline,scope=>hooks.Find(scope));
                         if(target!=null)break;
+                        // A successful COM activation can acknowledge the old
+                        // process just before it finishes exiting, including a
+                        // previous installation whose pipe is not in this folder.
+                        // Require two fresh absence observations separated by the
+                        // bounded wait. A timeout/failed activation never gets here.
+                        bool running=Observe(hooks,deadline,scope=>hooks.IsRunning());
+                        if(!running&&absentAfterCompletedActivation)
+                            return Result(hooks,log,started,activations,host,WarmStartupDecision.Cold,"activated-client-exited");
+                        absentAfterCompletedActivation=!running;
                         int delay=Math.Min(100,Remaining(deadline,hooks.Elapsed()));
                         if(delay>0)hooks.Delay(delay);
                     }
